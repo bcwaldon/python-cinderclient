@@ -89,6 +89,12 @@ class Volume(base.Resource):
         """
         return self.manager.terminate_connection(self, connector)
 
+    def read(self):
+        return self.manager.read(self)
+
+    def write(self, input_file):
+        return self.manager.write(self, input_file)
+
 
 class VolumeManager(base.ManagerWithFind):
     """
@@ -311,3 +317,12 @@ class VolumeManager(base.ManagerWithFind):
         """
         self._action('os-terminate_connection', volume,
                      {'connector': connector})
+
+    def read(self, volume):
+        url = "/os-volume-data-transfer/%s" % base.getid(volume)
+        resp, body = self.api.client.get(url, raw_request=True)
+        return body
+
+    def write(self, volume, input_file):
+        url = "/os-volume-data-transfer/%s" % base.getid(volume)
+        self.api.client.put(url, body=input_file, raw_request=True)

@@ -7,9 +7,11 @@
 OpenStack Client interface. Handles the REST calls and responses.
 """
 
+import httplib
 import httplib2
 import logging
 import os
+import sys
 import urlparse
 
 try:
@@ -81,9 +83,34 @@ class HTTPClient(httplib2.Http):
             string_parts.append(header)
 
         _logger.debug("REQ: %s\n" % "".join(string_parts))
-        if 'body' in kwargs:
-            _logger.debug("REQ BODY: %s\n" % (kwargs['body']))
+        #if 'body' in kwargs:
+        #    _logger.debug("REQ BODY: %s\n" % (kwargs['body']))
         _logger.debug("RESP:%s %s\n", resp, body)
+
+    def raw_request(self, url, method, **kwargs):
+        parts = urlparse.urlparse(self.management_url)
+        connection = httplib.HTTPConnection(parts.netloc)
+        headers = kwargs.get('headers', {})
+        headers['Content-Type'] = 'application/octet-stream'
+        headers['Transfer-Encoding'] = 'chunked'
+        connection.putrequest(method, '%s/%s' % (parts.path, url))
+        for header, value in headers.items():
+            connection.putheader(header, value)
+        connection.endheaders()
+        if 'body' in kwargs:
+            amt_sent = 0
+            chunk = kwargs['body'].read(65536)
+            while chunk:
+                _logger.info(chunk)
+                connection.send('%s\r\n' % hex(len(chunk)))
+                connection.send('%s\r\n' % chunk)
+                chunk = kwargs['body'].read(65536)
+            else:
+                connection.send('0\r\n')
+                connection.send('\r\n')
+                connection.send('\r\n')
+        resp = connection.getresponse()
+        return resp, resp
 
     def request(self, *args, **kwargs):
         kwargs.setdefault('headers', kwargs.get('headers', {}))
@@ -97,7 +124,7 @@ class HTTPClient(httplib2.Http):
 
         self.http_log(args, kwargs, resp, body)
 
-        if body:
+        if resp['content-type'] == 'application/json':
             try:
                 body = json.loads(body)
             except ValueError:
@@ -121,10 +148,11 @@ class HTTPClient(httplib2.Http):
             kwargs.setdefault('headers', {})['X-Auth-Token'] = self.auth_token
             if self.projectid:
                 kwargs['headers']['X-Auth-Project-Id'] = self.projectid
-
-            resp, body = self.request(self.management_url + url, method,
-                                      **kwargs)
-            return resp, body
+            if kwargs.pop('raw_request', False):
+                return self.raw_request(url, method, **kwargs)
+            else:
+                return self.request(self.management_url + url, method,
+                                          **kwargs)
         except exceptions.Unauthorized, ex:
             try:
                 self.authenticate()
@@ -201,7 +229,7 @@ class HTTPClient(httplib2.Http):
                         % (self.proxy_token, self.proxy_tenant_id)])
         _logger.debug("Using Endpoint URL: %s" % url)
         resp, body = self.request(url, "GET",
-                                  headers={'X-Auth_Token': self.auth_token})
+                                  headers={'X-Auth_Token': self.proxy_token})
         return self._extract_service_catalog(url, resp, body,
                                              extract_token=False)
 
@@ -225,12 +253,6 @@ class HTTPClient(httplib2.Http):
 
         auth_url = self.auth_url
         if self.version == "v2.0":
-            while auth_url:
-                if "CINDER_RAX_AUTH" in os.environ:
-                    auth_url = self._rax_auth(auth_url)
-                else:
-                    auth_url = self._v2_auth(auth_url)
-
             # Are we acting on behalf of another user via an
             # existing token? If so, our actual endpoints may
             # be different than that of the admin token.
@@ -240,6 +262,13 @@ class HTTPClient(httplib2.Http):
                 # with the endpoints any more, we need to replace
                 # our service account token with the user token.
                 self.auth_token = self.proxy_token
+            else:
+                while auth_url:
+                    if "CINDER_RAX_AUTH" in os.environ:
+                        auth_url = self._rax_auth(auth_url)
+                    else:
+                        auth_url = self._v2_auth(auth_url)
+
         else:
             try:
                 while auth_url:

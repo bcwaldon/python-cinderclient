@@ -155,6 +155,30 @@ def do_show(cs, args):
     _print_volume(volume)
 
 
+@utils.arg('volume', metavar='<volume>', help='ID of the volume.')
+@utils.arg('--file', metavar='<file>', help='Path to output file. Defaults to stdout if no file is provided.')
+@utils.service_type('volume')
+def do_read(cs, args):
+    """Show details about a volume."""
+    volume = _find_volume(cs, args.volume)
+    output_file = file(args.file, 'w') if args.file else sys.stdout
+    volume_file = volume.read()
+    chunk = volume_file.read(65536)
+    while chunk:
+        output_file.write(chunk)
+        chunk = volume_file.read(65536)
+
+
+@utils.arg('volume', metavar='<volume>', help='ID of the volume.')
+@utils.arg('--file', metavar='<file>', help='Path to input file. Defaults to stdin if no file is provided.')
+@utils.service_type('volume')
+def do_write(cs, args):
+    """Show details about a volume."""
+    volume = _find_volume(cs, args.volume)
+    input_file = file(args.file) if args.file else sys.stdin
+    volume.write(input_file)
+
+
 @utils.arg('size',
            metavar='<size>',
            type=int,
